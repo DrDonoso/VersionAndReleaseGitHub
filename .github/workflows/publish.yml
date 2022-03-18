@@ -1,0 +1,104 @@
+name: Generate release
+
+concurrency: 
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+on: 
+  pull_request:
+    types: [closed]
+    branches: ['main', 'main-*']
+
+jobs:
+  get-latest-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v6
+        id: get-latest-release
+        with:
+          script: |
+            try {
+              const release = await github.rest.repos.getLatestRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo
+              })
+
+              return release.data.name
+
+            }
+            catch (error) {
+              if(error.status === 404){
+                return "NOT_FOUND"
+              }
+              else{
+                throw error
+              }
+            }
+
+          github-token: ${{ secrets.MY_PAT }}
+          result-encoding: string
+
+    outputs:
+      release: ${{ steps.get-latest-release.outputs.result }}
+
+  initial-release:
+    needs: [get-latest-release]
+    runs-on: ubuntu-latest
+    if: needs.get-latest-release.outputs.release == 'NOT_FOUND'
+    steps:
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          tag_name: v1.0.0
+
+  upgrade-release:
+    needs: [get-latest-release]
+    runs-on: ubuntu-latest
+    if: false == (needs.get-latest-release.outputs.release == 'NOT_FOUND')
+    steps:
+      - name: Set release labels
+        id: set-release-labels
+        run: |
+          echo "${{ github.event.inputs.RELEASE_LABELS }}"
+          echo "${{ github.event.pull_request.labels }}"
+          echo "RELEASE_LABELS=${{ github.event.inputs.RELEASE_LABELS || join(github.event.pull_request.labels.*.name, ', ') }}" >> "$GITHUB_ENV"
+
+      - name: Get major, minor and patch versions
+        id: get-versions
+        run: |
+          version=$(echo '${{ needs.get-latest-release.outputs.release }}' | sed 's/v//')
+          IFS='.'
+          read -r -a versions <<< $version
+
+          echo "MAJOR_VERSION=${versions[0]}" >> $GITHUB_ENV
+          echo "MINOR_VERSION=${versions[1]}" >> $GITHUB_ENV
+          echo "PATCH_VERSION=${versions[2]}" >> $GITHUB_ENV
+
+      - name: Setup major release type version
+        if: contains(env.RELEASE_LABELS, 'release-type/major')
+        run: |
+          echo "MAJOR_VERSION=$(($MAJOR_VERSION+1))" >> $GITHUB_ENV
+
+      - name: Setup minor release type version
+        if: contains(env.RELEASE_LABELS, 'release-type/minor')
+        run: |
+          echo "MINOR_VERSION=$(($MINOR_VERSION+1))" >> $GITHUB_ENV
+
+      - name: Setup patch release type version
+        if: contains(env.RELEASE_LABELS, 'release-type/hotfix')
+          || contains(env.RELEASE_LABELS, 'release-type/multi-hotfix')
+          || contains(env.RELEASE_LABELS, 'release-type/patch')
+        run: |
+          echo "PATCH_VERSION=$(($PATCH_VERSION+1))" >> $GITHUB_ENV
+          
+      - name: Set final release version
+        run: |
+          echo "RELEASE_VERSION="v$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION"" >> $GITHUB_ENV
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          tag_name: ${{ env.RELEASE_VERSION }}
+        
