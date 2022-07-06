@@ -1,14 +1,10 @@
-name: Generate release
-
-concurrency: 
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
+name: Generate a version and a release
 
 on: 
   pull_request:
     types: [closed]
     branches: ['main', 'main-*']
-
+    
 jobs:
   get-latest-release:
     runs-on: ubuntu-latest
@@ -22,9 +18,7 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo
               })
-
               return release.data.name
-
             }
             catch (error) {
               if(error.status === 404){
@@ -34,8 +28,7 @@ jobs:
                 throw error
               }
             }
-
-          github-token: ${{ secrets.MY_PAT }}
+          github-token: ${{ secrets.GH_TOKEN_READER  }}
           result-encoding: string
 
     outputs:
@@ -46,11 +39,18 @@ jobs:
     runs-on: ubuntu-latest
     if: needs.get-latest-release.outputs.release == 'NOT_FOUND'
     steps:
-      - name: Release
-        uses: softprops/action-gh-release@v1
+      - name: Initial release
+        uses: actions/github-script@v6
+        id: create-release
         with:
-          generate_release_notes: true
-          tag_name: v1.0.0
+          script: |
+              await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: "v1.0.0",
+                generate_release_notes: true
+              })
+          github-token: ${{ secrets.GH_TOKEN_PUSH }}
 
   upgrade-release:
     needs: [get-latest-release]
@@ -63,28 +63,26 @@ jobs:
           echo "${{ github.event.inputs.RELEASE_LABELS }}"
           echo "${{ github.event.pull_request.labels }}"
           echo "RELEASE_LABELS=${{ github.event.inputs.RELEASE_LABELS || join(github.event.pull_request.labels.*.name, ', ') }}" >> "$GITHUB_ENV"
-
       - name: Get major, minor and patch versions
         id: get-versions
         run: |
           version=$(echo '${{ needs.get-latest-release.outputs.release }}' | sed 's/v//')
           IFS='.'
           read -r -a versions <<< $version
-
           echo "MAJOR_VERSION=${versions[0]}" >> $GITHUB_ENV
           echo "MINOR_VERSION=${versions[1]}" >> $GITHUB_ENV
           echo "PATCH_VERSION=${versions[2]}" >> $GITHUB_ENV
-
       - name: Setup major release type version
         if: contains(env.RELEASE_LABELS, 'release-type/major')
         run: |
           echo "MAJOR_VERSION=$(($MAJOR_VERSION+1))" >> $GITHUB_ENV
-
+          echo "MINOR_VERSION=0" >> $GITHUB_ENV
+          echo "PATCH_VERSION=0" >> $GITHUB_ENV
       - name: Setup minor release type version
         if: contains(env.RELEASE_LABELS, 'release-type/minor')
         run: |
           echo "MINOR_VERSION=$(($MINOR_VERSION+1))" >> $GITHUB_ENV
-
+          echo "PATCH_VERSION=0" >> $GITHUB_ENV
       - name: Setup patch release type version
         if: contains(env.RELEASE_LABELS, 'release-type/hotfix')
           || contains(env.RELEASE_LABELS, 'release-type/multi-hotfix')
@@ -95,10 +93,15 @@ jobs:
       - name: Set final release version
         run: |
           echo "RELEASE_VERSION="v$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION"" >> $GITHUB_ENV
-
-      - name: Release
-        uses: softprops/action-gh-release@v1
+      - name: Create release
+        uses: actions/github-script@v6
+        id: create-release
         with:
-          generate_release_notes: true
-          tag_name: ${{ env.RELEASE_VERSION }}
-        
+          script: |
+              await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: "${{ env.RELEASE_VERSION }}",
+                generate_release_notes: true
+              })
+          github-token: ${{ secrets.GH_TOKEN_PUSH }}
