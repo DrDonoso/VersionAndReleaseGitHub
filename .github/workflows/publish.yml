@@ -28,7 +28,7 @@ jobs:
                 throw error
               }
             }
-          github-token: ${{ secrets.GH_TOKEN_READER  }}
+          github-token: ${{ secrets.MY_PAT  }}
           result-encoding: string
 
     outputs:
@@ -50,7 +50,7 @@ jobs:
                 tag_name: "v1.0.0",
                 generate_release_notes: true
               })
-          github-token: ${{ secrets.GH_TOKEN_PUSH }}
+          github-token: ${{ secrets.MY_PAT }}
 
   upgrade-release:
     needs: [get-latest-release]
@@ -104,4 +104,4 @@ jobs:
                 tag_name: "${{ env.RELEASE_VERSION }}",
                 generate_release_notes: true
               })
-          github-token: ${{ secrets.GH_TOKEN_PUSH }}
+          github-token: ${{ secrets.MY_PAT }}
